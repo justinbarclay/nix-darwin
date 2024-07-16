@@ -7,9 +7,9 @@ let
   cfg = config.services.postgresql;
 
   postgresql =
-    if cfg.extraPlugins == []
-      then cfg.package
-      else cfg.package.withPackages (_: cfg.extraPlugins);
+    if cfg.extraPlugins == [ ]
+    then cfg.package
+    else cfg.package.withPackages (_: cfg.extraPlugins);
 
   toStr = value:
     if true == value then "yes"
@@ -20,7 +20,7 @@ let
   # The main PostgreSQL configuration file.
   configFile = pkgs.writeTextDir "postgresql.conf" (concatStringsSep "\n" (mapAttrsToList (n: v: "${n} = ${toStr v}") cfg.settings));
 
-  configFileCheck = pkgs.runCommand "postgresql-configfile-check" {} ''
+  configFileCheck = pkgs.runCommand "postgresql-configfile-check" { } ''
     ${cfg.package}/bin/postgres -D${configFile} -C config_file >/dev/null
     touch $out
   '';
@@ -107,7 +107,7 @@ in
 
       initdbArgs = mkOption {
         type = with types; listOf str;
-        default = [];
+        default = [ ];
         example = [ "--data-checksums" "--allow-group-access" ];
         description = ''
           Additional arguments passed to `initdb` during data dir
@@ -125,7 +125,7 @@ in
 
       ensureDatabases = mkOption {
         type = types.listOf types.str;
-        default = [];
+        default = [ ];
         description = ''
           Ensures that the specified databases exist.
           This option will never delete existing databases, especially not when the value of this
@@ -149,7 +149,7 @@ in
             };
             ensurePermissions = mkOption {
               type = types.attrsOf types.str;
-              default = {};
+              default = { };
               description = ''
                 Permissions to ensure for the user, specified as an attribute set.
                 The attribute names specify the database and tables to grant the permissions for.
@@ -170,7 +170,7 @@ in
             };
           };
         });
-        default = [];
+        default = [ ];
         description = ''
           Ensures that the specified users exist and have at least the ensured permissions.
           The PostgreSQL users will be identified using peer authentication. This authenticates the Unix user with the
@@ -220,7 +220,7 @@ in
 
       extraPlugins = mkOption {
         type = types.listOf types.path;
-        default = [];
+        default = [ ];
         example = literalExpression "with pkgs.postgresql_11.pkgs; [ postgis pg_repack ]";
         description = ''
           List of PostgreSQL plugins. PostgreSQL version for each plugin should
@@ -230,7 +230,7 @@ in
 
       settings = mkOption {
         type = with types; attrsOf (oneOf [ bool float int str ]);
-        default = {};
+        default = { };
         description = ''
           PostgreSQL configuration. Refer to
           <https://www.postgresql.org/docs/11/config-setting.html#CONFIG-SETTING-CONFIGURATION-FILE>
@@ -271,7 +271,7 @@ in
           PostgreSQL superuser account to use for various operations. Internal since changing
           this value would lead to breakage while setting up databases.
         '';
-        };
+      };
     };
 
   };
@@ -285,14 +285,17 @@ in
     #
     # one could perhaps trigger another agent by the existing agent, but
     # I couldn't find how to do that.
-    warnings = if cfg.initialScript != null
-      || cfg.ensureDatabases != []
-      || cfg.ensureUsers != []
-      then [''
-        Currently nix-darwin does not support postgresql initialScript,
-        ensureDatabases, or ensureUsers
-      '']
-      else [];
+    warnings =
+      if cfg.initialScript != null
+        || cfg.ensureDatabases != [ ]
+        || cfg.ensureUsers != [ ]
+      then [
+        ''
+          Currently nix-darwin does not support postgresql initialScript,
+          ensureDatabases, or ensureUsers
+        ''
+      ]
+      else [ ];
 
     services.postgresql.settings =
       {
@@ -304,14 +307,15 @@ in
         port = cfg.port;
       };
 
-    services.postgresql.package = let
+    services.postgresql.package =
+      let
         mkThrow = ver: throw "postgresql_${ver} was removed, please upgrade your postgresql version.";
-    in
+      in
       # Note: when changing the default, make it conditional on
-      # ‘system.stateVersion’ to maintain compatibility with existing
-      # systems!
+        # ‘system.stateVersion’ to maintain compatibility with existing
+        # systems!
       mkDefault (if config.system.stateVersion >= 4 then pkgs.postgresql_14
-            else mkThrow "9_6");
+      else mkThrow "9_6");
 
     services.postgresql.dataDir = mkDefault "/var/lib/postgresql/${cfg.package.psqlSchema}";
 
@@ -326,14 +330,15 @@ in
     environment.systemPackages = [ postgresql ];
 
     environment.pathsToLink = [
-     "/share/postgresql"
+      "/share/postgresql"
     ];
 
     # FIXME: implement system.extraDependencies to do this less sketchily
     # system.extraDependencies = lib.optional (cfg.checkConfig && pkgs.stdenv.hostPlatform == pkgs.stdenv.buildPlatform) configFileCheck;
 
     launchd.user.agents.postgresql =
-      { path = [ postgresql ];
+      {
+        path = [ postgresql ];
         script = ''
           # FIXME: ${if cfg.checkConfig then configFileCheck else ""}
 
@@ -358,8 +363,13 @@ in
           exec ${postgresql}/bin/postgres
         '';
 
-        serviceConfig.KeepAlive = true;
-        serviceConfig.RunAtLoad = true;
+        serviceConfig = {
+          KeepAlive = true;
+          RunAtLoad = true;
+          StandardErrorPath = "/Users/justin/postgres.error.log";
+          StandardOutPath = "/Users/justin/postgres.log";
+        };
+
         serviceConfig.EnvironmentVariables = {
           PGDATA = cfg.dataDir;
         };
